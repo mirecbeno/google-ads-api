@@ -50,7 +50,7 @@ def update_seasonality_adjustment(client, customer_id, adjustment_id, start_date
 # Dátumy ako premenná pre viaceré účty
 NEW_START_DATE = "2026-04-24 18:00:00"
 NEW_END_DATE = "2026-04-25 23:00:00"
-#NEW_MODIFIER = 0.85  # Zníženie o 20%
+#NEW_MODIFIER = 0.80  # Zníženie o 20%
 
 TASKS = [
     # SK
