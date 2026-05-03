@@ -9,41 +9,58 @@ import xml.etree.ElementTree as ET
 # ==========================================
 
 # URL tvojho XML feedu
-FEED_URL = "...12345-feed.xml"
+FEED_URL = "https://www.domena.sk/feed.xml"
 
 CAMPAIGN_NAME = "Search_Produkty_2026"
+AD_LABEL = "test_label"
+# UPOZORNENIE: JSON štruktúra je upravená. 
+# Pridané "position": X. Ak pozíciu nechceš, kľúč "position" úplne vymaž.
 
-# UPOZORNENIE: V Google Feede sa názov volá 'title' (nie 'name') a url sa volá 'link'.
-# Všetky 'g:' prefixy ignorujeme, zadávaš to bez nich.
 AD_TEMPLATES_JSON = """
 {
     "headlines": {
-        "Headline 1": [
-            {"text": "Kúpte {{title}}", "max_len": 30},
-            {"text": "Značkové {{product_type}}", "max_len": 30},
-            {"text": "Kvalitné produkty v zľave", "max_len": 30}
-        ],
-        "Headline 2": [
-            {"text": "{{title}}", "max_len": 30},
-            {"text": "Značkové {{product_type}}", "max_len": 30},
-            {"text": "Nevydalo", "max_len": 30}
-        ],
-        "Headline 3": [
-            {"text": "Len za {{price}}", "max_len": 30},
-            {"text": "Skvelé ceny v našom e-shope", "max_len": 30}
-        ],
-        "Headline 4": [
-            {"text": "Skladom odosielame ihneď", "max_len": 30}
-        ]
+        "Headline 1": {
+            "position": 1,
+            "templates": [
+                {"text": "Kúpte {{title}}", "max_len": 30},
+                {"text": "Značkové {{product_type}}", "max_len": 30},
+                {"text": "Kvalitné produkty v zľave", "max_len": 30}
+            ]
+        },
+        "Headline 2": {
+            "position": 2,
+            "templates": [
+                {"text": "{{title}}", "max_len": 30},
+                {"text": "Značkové {{product_type}}", "max_len": 30},
+                {"text": "Nevydalo", "max_len": 30}
+            ]
+        },
+        "Headline 3": {
+            "position": 3,
+            "templates": [
+                {"text": "Len za {{price}}", "max_len": 30},
+                {"text": "Skvelé ceny v našom e-shope", "max_len": 30}
+            ]
+        },
+        "Headline 4": {
+            "templates": [
+                {"text": "Skladom odosielame ihneď", "max_len": 30}
+            ]
+        }
     },
     "descriptions": {
-        "Description 1": [
-            {"text": "Objednajte si {{title}} od značky {{brand}} ešte dnes. Super cena {{price}}.", "max_len": 90},
-            {"text": "Objednajte si {{brand}} produkty ešte dnes. Najlepšie ceny na trhu.", "max_len": 90}
-        ],
-        "Description 2": [
-            {"text": "Doprava zadarmo nad 50€. Bezpečný nákup a rýchle dodanie až k vám domov.", "max_len": 90}
-        ]
+        "Description 1": {
+            "position": 1,
+            "templates": [
+                {"text": "Objednajte si {{title}} od značky {{brand}} ešte dnes. Super cena {{price}}.", "max_len": 90},
+                {"text": "Objednajte si {{brand}} produkty ešte dnes. Najlepšie ceny na trhu.", "max_len": 90}
+            ]
+        },
+        "Description 2": {
+            "templates": [
+                {"text": "Doprava zadarmo nad 50€. Bezpečný nákup a rýchle dodanie až k vám domov.", "max_len": 90}
+            ]
+        }
     }
 }
 """
@@ -105,11 +122,9 @@ def fetch_and_parse_google_feed(url):
     
     items_data = []
     
-    # Prechádzame všetky <item> tagy v RSS/XML
     for item in root.findall('.//item'):
         item_dict = {}
         for child in item:
-            # Odstránenie menného priestoru (namespace), napr. {http://base.google.com/ns/1.0}price -> price
             tag_name = child.tag.split('}')[-1]
             item_dict[tag_name] = child.text if child.text else ""
             
@@ -117,8 +132,6 @@ def fetch_and_parse_google_feed(url):
         
     df = pd.DataFrame(items_data)
     
-    # Google Ads cena obsahuje menu (napr. "120.00 EUR"). 
-    # Vytvoríme čistý číselný stĺpec 'price_numeric' pre matematické filtrovanie.
     if 'price' in df.columns:
         df['price_numeric'] = df['price'].str.extract(r'([\d\.]+)').astype(float)
     else:
@@ -126,11 +139,8 @@ def fetch_and_parse_google_feed(url):
 
     print(f"Úspešne načítaných {len(df)} produktov z feedu.")
     
-    # TVOJ FILTER (Zmenené na štandardné Google hodnoty)
-    # V Google je to 'in_stock', nie 'in stock'
     df_filtered = df[
         (df['availability'] == 'in_stock') & 
-        #(df['price_numeric'] >= 20.0) &
         (df['product_type'].str.contains('ovocie', na=False))
     ].copy()
     
@@ -157,26 +167,45 @@ def main():
     
     for index, row in df_feed.iterrows():
         
-        # ID a Názov tvoria reklamnú skupinu
         ad_group_name = f"{row.get('id', 'N/A')} - {row.get('title', 'Bez nazvu')}"
         
-        # Reklamy (v Google feede je to link, nie url)
+        # Pridaný Ad type a Labels
         ad_row = {
             'Campaign': CAMPAIGN_NAME,
             'Ad Group': ad_group_name,
+            'Ad type': 'Responsive search ad',
+            'Labels': AD_LABEL,
             'Final URL': row.get('link', ''),
             'Status': 'Paused'
         }
         
-        for hl_key, hl_templates in ad_templates['headlines'].items():
-            ad_row[hl_key] = get_valid_ad_text(row, hl_templates)
+        # Spracovanie Headlines
+        for hl_key, hl_data in ad_templates['headlines'].items():
+            # Vygenerovanie textu
+            ad_row[hl_key] = get_valid_ad_text(row, hl_data['templates'])
             
-        for desc_key, desc_templates in ad_templates['descriptions'].items():
-            ad_row[desc_key] = get_valid_ad_text(row, desc_templates)
+            # Pridanie stĺpca s pozíciou (pin)
+            pos_key = f"{hl_key} position"
+            if 'position' in hl_data and hl_data['position']:
+                ad_row[pos_key] = hl_data['position']
+            else:
+                ad_row[pos_key] = ' -' # Medzera a pomlčka ako vyžaduje G. Ads Editor
+                
+        # Spracovanie Descriptions
+        for desc_key, desc_data in ad_templates['descriptions'].items():
+            # Vygenerovanie textu
+            ad_row[desc_key] = get_valid_ad_text(row, desc_data['templates'])
+            
+            # Pridanie stĺpca s pozíciou (pin)
+            pos_key = f"{desc_key} position"
+            if 'position' in desc_data and desc_data['position']:
+                ad_row[pos_key] = desc_data['position']
+            else:
+                ad_row[pos_key] = ' -' # Medzera a pomlčka ako vyžaduje G. Ads Editor
             
         ads_data.append(ad_row)
         
-        # Kľúčové slová
+        # Kľúčové slová (bez zmeny)
         kws = generate_keywords(row)
         for kw in kws:
             keywords_data.append({
@@ -190,10 +219,9 @@ def main():
     df_ads = pd.DataFrame(ads_data)
     df_keywords = pd.DataFrame(keywords_data)
     
-    df_ads.to_csv('1_ads_import.csv', index=False, encoding='utf-8-sig')
-    df_keywords.to_csv('2_keywords_import.csv', index=False, encoding='utf-8-sig')
+    df_ads.to_csv('D:\\1_ads_import2.csv', index=False, encoding='utf-8-sig')
+    df_keywords.to_csv('D:\\2_keywords_import2.csv', index=False, encoding='utf-8-sig')
     
-    print("Hotovo! Súbory '1_ads_import.csv' a '2_keywords_import.csv' boli vytvorené.")
-
+    print("Hotovo! Súbory '1_ads_import2.csv' a '2_keywords_import2.csv' boli vytvorené.")
 
 main()
