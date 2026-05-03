@@ -12,10 +12,11 @@ import xml.etree.ElementTree as ET
 FEED_URL = "https://www.domena.sk/feed.xml"
 
 CAMPAIGN_NAME = "Search_Produkty_2026"
-AD_LABEL = "test_label"
-# UPOZORNENIE: JSON štruktúra je upravená. 
-# Pridané "position": X. Ak pozíciu nechceš, kľúč "position" úplne vymaž.
+AD_LABEL = "ad_label_1"
 
+# UPOZORNENIE: V Google Feede sa názov volá 'title' (nie 'name') a url sa volá 'link'.
+# Všetky 'g:' prefixy ignorujeme, zadávaš to bez nich.
+# Štruktúra umožňuje definovať 'position' pre uzamknutie pozície (pin) v responzívnej reklame.
 AD_TEMPLATES_JSON = """
 {
     "headlines": {
@@ -122,9 +123,11 @@ def fetch_and_parse_google_feed(url):
     
     items_data = []
     
+    # Prechádzame všetky <item> tagy v RSS/XML
     for item in root.findall('.//item'):
         item_dict = {}
         for child in item:
+            # Odstránenie menného priestoru (namespace), napr. {http://base.google.com/ns/1.0}price -> price
             tag_name = child.tag.split('}')[-1]
             item_dict[tag_name] = child.text if child.text else ""
             
@@ -132,15 +135,22 @@ def fetch_and_parse_google_feed(url):
         
     df = pd.DataFrame(items_data)
     
+    # Google Ads cena obsahuje menu (napr. "120.00 EUR"). 
+    # Vytvoríme čistý číselný stĺpec 'price_numeric' pre matematické filtrovanie.
+    # Očistíme aj samotný stĺpec 'price', aby sa v textových šablónach (napr. {{price}}) zobrazila len číselná hodnota bez meny.
     if 'price' in df.columns:
         df['price_numeric'] = df['price'].str.extract(r'([\d\.]+)').astype(float)
+        df['price'] = df['price'].astype(str).str.replace(r'[^\d\.,]', '', regex=True)
     else:
         df['price_numeric'] = 0.0
 
     print(f"Úspešne načítaných {len(df)} produktov z feedu.")
     
+    # TVOJ FILTER (Zmenené na štandardné Google hodnoty)
+    # V Google je to 'in_stock', nie 'in stock'
     df_filtered = df[
         (df['availability'] == 'in_stock') & 
+        #(df['price_numeric'] >= 20.0) &
         (df['product_type'].str.contains('ovocie', na=False))
     ].copy()
     
@@ -167,9 +177,11 @@ def main():
     
     for index, row in df_feed.iterrows():
         
+        # ID a Názov tvoria reklamnú skupinu
         ad_group_name = f"{row.get('id', 'N/A')} - {row.get('title', 'Bez nazvu')}"
         
-        # Pridaný Ad type a Labels
+        # Reklamy (v Google feede je to link, nie url)
+        # Definovanie statických parametrov podľa požiadaviek Google Ads Editora
         ad_row = {
             'Campaign': CAMPAIGN_NAME,
             'Ad Group': ad_group_name,
@@ -179,33 +191,31 @@ def main():
             'Status': 'Paused'
         }
         
-        # Spracovanie Headlines
+        # Generovanie textov pre Headlines a nastavenie ich pinu (pozície)
         for hl_key, hl_data in ad_templates['headlines'].items():
-            # Vygenerovanie textu
             ad_row[hl_key] = get_valid_ad_text(row, hl_data['templates'])
             
-            # Pridanie stĺpca s pozíciou (pin)
+            # G. Ads Editor vyžaduje ' -' ak pozícia nie je explicitne uzamknutá
             pos_key = f"{hl_key} position"
             if 'position' in hl_data and hl_data['position']:
                 ad_row[pos_key] = hl_data['position']
             else:
-                ad_row[pos_key] = ' -' # Medzera a pomlčka ako vyžaduje G. Ads Editor
+                ad_row[pos_key] = ' -'
                 
-        # Spracovanie Descriptions
+        # Generovanie textov pre Descriptions a nastavenie ich pinu (pozície)
         for desc_key, desc_data in ad_templates['descriptions'].items():
-            # Vygenerovanie textu
             ad_row[desc_key] = get_valid_ad_text(row, desc_data['templates'])
             
-            # Pridanie stĺpca s pozíciou (pin)
+            # G. Ads Editor vyžaduje ' -' ak pozícia nie je explicitne uzamknutá
             pos_key = f"{desc_key} position"
             if 'position' in desc_data and desc_data['position']:
                 ad_row[pos_key] = desc_data['position']
             else:
-                ad_row[pos_key] = ' -' # Medzera a pomlčka ako vyžaduje G. Ads Editor
+                ad_row[pos_key] = ' -'
             
         ads_data.append(ad_row)
         
-        # Kľúčové slová (bez zmeny)
+        # Kľúčové slová
         kws = generate_keywords(row)
         for kw in kws:
             keywords_data.append({
@@ -223,5 +233,6 @@ def main():
     df_keywords.to_csv('D:\\2_keywords_import2.csv', index=False, encoding='utf-8-sig')
     
     print("Hotovo! Súbory '1_ads_import2.csv' a '2_keywords_import2.csv' boli vytvorené.")
+
 
 main()
